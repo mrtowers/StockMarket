@@ -194,6 +194,21 @@ public class AsyncMarket implements IAsyncMarket{
         }
 
         /**
+         * Issue 31: true when the player is a StockMarket admin or holds a
+         * manage scope covering this market (OWN for their own markets, ANY
+         * for every market). Server-side callers without a player UUID bypass
+         * this helper entirely.
+         */
+        boolean canManageMarket(UUID playerID, ISyncServerMarket market)
+        {
+            if (isPlayerAdmin(playerID)) return true;
+            IServerMarketManager manager = AsyncMarket.SERVER_BACKEND_INSTANCES.MARKET_MANAGER.getSync();
+            return manager != null
+                    && manager.getPlayerMarketPermissions(playerID)
+                              .canManage(market.getOwnerUUID(), playerID);
+        }
+
+        /**
          * Gets called by the Request handler on the master side
          * @param input the input data provided by the function call
          * @param playerSender the player. If null, no player has sent the request (server only request)
@@ -250,7 +265,7 @@ public class AsyncMarket implements IAsyncMarket{
                 {
                     if(playerSender != null)
                     {
-                        if(!isPlayerAdmin(playerSender))
+                        if(!canManageMarket(playerSender, market))
                             yield OutputData.of(input.function, false);
                     }
                     yield OutputData.of(input.function, market.setMaintenance((Boolean)inputData.extra));
@@ -260,7 +275,7 @@ public class AsyncMarket implements IAsyncMarket{
                 case FunctionType.GetSettings ->  {
                     if(playerSender != null)
                     {
-                        if(!isPlayerAdmin(playerSender))
+                        if(!canManageMarket(playerSender, market))
                             yield OutputData.of(input.function, new MarketSettings());
                     }
                     yield OutputData.of(input.function, market.getSettings());
@@ -268,7 +283,7 @@ public class AsyncMarket implements IAsyncMarket{
                 case FunctionType.SetSettings ->  {
                     if(playerSender != null)
                     {
-                        if(!isPlayerAdmin(playerSender))
+                        if(!canManageMarket(playerSender, market))
                             yield OutputData.of(input.function, false);
                     }
                     market.setSettings((MarketSettings)inputData.extra);
@@ -277,7 +292,7 @@ public class AsyncMarket implements IAsyncMarket{
                 case FunctionType.ResetNetPlayerItemFlow -> {
                     if(playerSender != null)
                     {
-                        if(!isPlayerAdmin(playerSender))
+                        if(!canManageMarket(playerSender, market))
                             yield OutputData.of(input.function, false);
                     }
                     market.resetNetPlayerItemFlow();
@@ -286,7 +301,7 @@ public class AsyncMarket implements IAsyncMarket{
                 case FunctionType.ResetVirtualOrderbook -> {
                     if(playerSender != null)
                     {
-                        if(!isPlayerAdmin(playerSender))
+                        if(!canManageMarket(playerSender, market))
                             yield OutputData.of(input.function, false);
                     }
                     market.resetVirtualOrderbook();
@@ -295,7 +310,7 @@ public class AsyncMarket implements IAsyncMarket{
                 case FunctionType.ClearVirtualOrderbook -> {
                     if(playerSender != null)
                     {
-                        if(!isPlayerAdmin(playerSender))
+                        if(!canManageMarket(playerSender, market))
                             yield OutputData.of(input.function, false);
                     }
                     market.clearVirtualOrderbook();
@@ -304,7 +319,7 @@ public class AsyncMarket implements IAsyncMarket{
                 case FunctionType.SetTradingHours -> {
                     if(playerSender != null)
                     {
-                        if(!isPlayerAdmin(playerSender))
+                        if(!canManageMarket(playerSender, market))
                             yield OutputData.of(input.function, false);
                     }
                     ParamGroup_long_long params = (ParamGroup_long_long)inputData.extra;

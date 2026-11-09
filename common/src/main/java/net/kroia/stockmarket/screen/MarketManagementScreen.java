@@ -31,6 +31,16 @@ public class MarketManagementScreen extends StockMarketGuiScreen {
     private final MarketSettingsWidget marketSettingsWidget;
 
     public MarketManagementScreen(StockMarketGuiScreen parent, ItemID marketID) {
+        this(parent, marketID, true);
+    }
+
+    /**
+     * @param parent        the screen to return to
+     * @param marketID      the market to configure
+     * @param canManageAll  true for admins/manage=ANY; false hides the
+     *                      "apply to all markets" control for manage=OWN players
+     */
+    public MarketManagementScreen(StockMarketGuiScreen parent, ItemID marketID, boolean canManageAll) {
         // Parent goes to the GuiScreen base so its onClose() returns to it and restores
         // the cursor. Closing with a null parent and then calling setScreen(parent)
         // re-grabs/releases the mouse, which re-centers the cursor.
@@ -49,7 +59,7 @@ public class MarketManagementScreen extends StockMarketGuiScreen {
         layout.stretchY = false;
         listView.setLayout(layout);
 
-        marketSettingsWidget = new MarketSettingsWidget(market);
+        marketSettingsWidget = new MarketSettingsWidget(market, canManageAll);
         listView.addChild(marketSettingsWidget);
 
         addElement(candlestickChart);

@@ -5,6 +5,7 @@ import net.kroia.stockmarket.data.table.record.MarketPriceStruct;
 import net.kroia.stockmarket.stockmarket.market.MarketSettings;
 import net.kroia.stockmarket.stockmarket.market.core.Orderbook;
 import net.kroia.stockmarket.stockmarket.market.core.order.Order;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.UUID;
@@ -55,6 +56,16 @@ public interface ISyncServerMarket {
 
 
     ItemID getItemID();
+
+    /**
+     * @return the UUID of the player who created this market, or {@code null} for
+     *         server-owned markets (legacy markets, command/API-created markets).
+     *         The default keeps third-party implementations source-compatible.
+     */
+    default @Nullable UUID getOwnerUUID() {
+        return null;
+    }
+
     long getDefaultPrice();
     long getCurrentMarketPrice();
     long getCurrentTime();

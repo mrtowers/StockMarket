@@ -6,12 +6,15 @@ import net.kroia.stockmarket.StockMarketModBackend;
 import net.kroia.stockmarket.api.market.IPriceDataProvider;
 import net.kroia.stockmarket.api.marketmanager.IAsyncMarketManager;
 import net.kroia.stockmarket.api.marketmanager.IClientMarketManager;
+import net.kroia.stockmarket.api.marketmanager.MarketOwnerInfo;
+import net.kroia.stockmarket.api.marketmanager.PlayerMarketPermissions;
 import net.kroia.stockmarket.stockmarket.market.ClientMarket;
 import net.kroia.stockmarket.stockmarket.market.CrossRateMarket;
 import net.kroia.stockmarket.networking.request.ActiveOrdersRequest;
 import net.kroia.stockmarket.util.StockMarketClientHooks;
 import net.kroia.stockmarket.util.StockMarketGuiElement;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -89,6 +92,25 @@ public class ClientMarketManager implements IClientMarketManager
     public @Nullable ClientMarket getMarket(ItemID itemID)
     {
         return clientMarkets.get(itemID);
+    }
+
+    @Override
+    public CompletableFuture<PlayerMarketPermissions> getPlayerMarketPermissionsAsync(UUID playerUUID) {
+        return asyncMarketManager.getPlayerMarketPermissionsAsync(playerUUID);
+    }
+
+    @Override
+    public CompletableFuture<List<MarketOwnerInfo>> requestMarketOwners() {
+        return AsynchronousRequestResponseSystem.sendRequestToServer(
+                BACKEND_INSTANCES.NETWORKING.MARKET_OWNERS_REQUEST, 0);
+    }
+
+    @Override
+    public CompletableFuture<Boolean> requestCreateMarketFromStack(ItemStack stack) {
+        if (stack == null || stack.isEmpty())
+            return CompletableFuture.completedFuture(false);
+        return AsynchronousRequestResponseSystem.sendRequestToServer(
+                BACKEND_INSTANCES.NETWORKING.MARKET_CREATE_FROM_STACK_REQUEST, stack.copy());
     }
 
     @Override

@@ -6,7 +6,9 @@ import net.kroia.modutilities.gui.elements.*;
 import net.kroia.modutilities.gui.elements.base.ListView;
 import net.kroia.modutilities.gui.layout.LayoutGrid;
 import net.kroia.modutilities.gui.layout.LayoutVertical;
+import com.google.gson.JsonObject;
 import net.kroia.stockmarket.StockMarketMod;
+import net.kroia.stockmarket.api.marketmanager.PlayerMarketPermissions;
 import net.kroia.stockmarket.api.preset.IAsyncPresetManager;
 import net.kroia.stockmarket.stockmarket.market.preset.MarketPreset;
 import net.kroia.stockmarket.stockmarket.market.preset.MarketPresetCategory;
@@ -54,6 +56,8 @@ public class CreateMarketTab extends StockMarketGuiElement {
         public static final Component CLEAR_SELECTION = Component.translatable(PREFIX + "clear_selection");
         public static final Component SELECT_ALL = Component.translatable(PREFIX + "select_all");
         public static final Component DESELECT_ALL = Component.translatable(PREFIX + "deselect_all");
+        public static final Component ADD_ITEM = Component.translatable(PREFIX + "add_item");
+        public static final Component ADD_FROM_INVENTORY = Component.translatable(PREFIX + "add_from_inventory");
     }
 
     // Scrollable vertical list of category buttons (left panel)
@@ -68,6 +72,14 @@ public class CreateMarketTab extends StockMarketGuiElement {
     // Bulk selection buttons above the item grid — apply to the whole current category
     private final Button selectAllButton;
     private final Button deselectAllButton;
+    // Issue 31: arbitrary-item pickers (registry + player inventory).
+    private final Button addItemButton;
+    private final Button addFromInventoryButton;
+    private final Button cancelPickerButton;
+    private final ItemSelectionView itemSelectionView;
+    private final VerticalListView inventoryPickerView;
+    private boolean registryPickerMode = false;
+    private boolean inventoryPickerMode = false;
     // Right panel: list of selected items
     private final Label selectedLabel;
     private final ListView selectedItemsView;
@@ -86,14 +98,21 @@ public class CreateMarketTab extends StockMarketGuiElement {
     private @Nullable Runnable onMarketsChanged;
     // Cached categories fetched asynchronously from the server
     private final List<MarketPresetCategory> cachedCategories = new ArrayList<>();
+    /** Issue 31: false when the player has no market-create permission. */
+    private final boolean canCreate;
 
     public void setOnMarketsChanged(@Nullable Runnable callback) {
         this.onMarketsChanged = callback;
     }
 
     public CreateMarketTab() {
+        this(PlayerMarketPermissions.adminPermissions());
+    }
+
+    public CreateMarketTab(PlayerMarketPermissions permissions) {
         super();
         setEnableBackground(false);
+        this.canCreate = permissions != null && permissions.canCreate();
 
         // Category list (scrollable vertical list on the left)
         categoryListView = new VerticalListView();
@@ -127,6 +146,24 @@ public class CreateMarketTab extends StockMarketGuiElement {
         // selection is a harmless no-op, so gating the button just gets in the way.
         deselectAllButton = new Button(Texts.DESELECT_ALL.getString(), this::onDeselectAllClicked);
 
+        // Issue 31: registry/inventory pickers for arbitrary items.
+        addItemButton = new Button(Texts.ADD_ITEM.getString(), this::onAddItemClicked);
+        addFromInventoryButton = new Button(Texts.ADD_FROM_INVENTORY.getString(), this::onAddFromInventoryClicked);
+        cancelPickerButton = new Button("X", this::exitPicker);
+        cancelPickerButton.setEnabled(false);
+        cancelPickerButton.setBackgroundColor(0xFFc0392b);
+        cancelPickerButton.setHoverColor(0xFFe74c3c);
+        addItemButton.setEnabled(canCreate);
+        addFromInventoryButton.setEnabled(canCreate);
+
+        itemSelectionView = new ItemSelectionView(this::onItemSelectedFromPicker);
+        itemSelectionView.setEnabled(false);
+
+        inventoryPickerView = new VerticalListView();
+        inventoryPickerView.setEnableBackground(true);
+        inventoryPickerView.setLayout(new LayoutVertical(0, 4, false, false));
+        inventoryPickerView.setEnabled(false);
+
         // Right panel
         selectedLabel = new Label(Texts.SELECTED_ITEMS.getString());
         selectedLabel.setAlignment(Label.Alignment.CENTER);
@@ -148,19 +185,25 @@ public class CreateMarketTab extends StockMarketGuiElement {
         addChild(categoryListView);
         addChild(searchLabel);
         addChild(searchField);
+        addChild(addItemButton);
+        addChild(addFromInventoryButton);
+        addChild(cancelPickerButton);
         addChild(selectAllButton);
         addChild(deselectAllButton);
         addChild(itemGridView);
+        addChild(itemSelectionView);
+        addChild(inventoryPickerView);
         addChild(selectedLabel);
         addChild(selectedItemsView);
         addChild(createButton);
         addChild(clearButton);
 
         // T-123 (untrusted slave gate): the "Create All" button is the only
-        // mutating action on this tab. Users can still browse categories and
+        // mutating action on this tab. Issue 31 additionally gates it on the
+        // player's CREATE permission. Users can still browse categories and
         // build a selection; only the write to master is blocked. (The Clear
         // button just resets the client-side selection, so it stays enabled.)
-        if (isUntrustedSlave()) {
+        if (isUntrustedSlave() || !canCreate) {
             createButton.setEnabled(false);
         }
 
@@ -297,7 +340,8 @@ public class CreateMarketTab extends StockMarketGuiElement {
 
         // Select-all only enables when there's something in the category to add.
         // Deselect-all stays enabled unconditionally (harmless no-op on empty).
-        selectAllButton.setEnabled(selectableInCategory > 0);
+        selectAllButton.setEnabled(!registryPickerMode && !inventoryPickerMode && selectableInCategory > 0);
+        deselectAllButton.setEnabled(!registryPickerMode && !inventoryPickerMode);
     }
 
     /**
@@ -314,6 +358,179 @@ public class CreateMarketTab extends StockMarketGuiElement {
             SelectedItemEntry selectedEntry = new SelectedItemEntry(stack, preset, entry.getKey());
             selectedItemsView.addChild(selectedEntry);
         }
+    }
+
+    // ---- Issue 31: arbitrary-item pickers ----
+
+    private void onAddItemClicked() {
+        if (!canCreate || isUntrustedSlave()) return;
+        exitPicker();
+        registryPickerMode = true;
+        itemSelectionView.setEnabled(true);
+        itemGridView.setEnabled(false);
+        selectAllButton.setEnabled(false);
+        deselectAllButton.setEnabled(false);
+        addItemButton.setEnabled(false);
+        addFromInventoryButton.setEnabled(false);
+        cancelPickerButton.setEnabled(true);
+        layoutChanged();
+    }
+
+    private void onAddFromInventoryClicked() {
+        if (!canCreate || isUntrustedSlave()) return;
+        exitPicker();
+        inventoryPickerMode = true;
+        inventoryPickerView.setEnabled(true);
+        itemGridView.setEnabled(false);
+        selectAllButton.setEnabled(false);
+        deselectAllButton.setEnabled(false);
+        addItemButton.setEnabled(false);
+        addFromInventoryButton.setEnabled(false);
+        cancelPickerButton.setEnabled(true);
+        layoutChanged();
+        rebuildInventoryPicker();
+    }
+
+    /** Exits either picker and restores the normal create-tab controls. */
+    private void exitPicker() {
+        registryPickerMode = false;
+        inventoryPickerMode = false;
+        itemSelectionView.setEnabled(false);
+        inventoryPickerView.setEnabled(false);
+        itemGridView.setEnabled(true);
+        selectAllButton.setEnabled(true);
+        deselectAllButton.setEnabled(true);
+        addItemButton.setEnabled(canCreate && !isUntrustedSlave());
+        addFromInventoryButton.setEnabled(canCreate && !isUntrustedSlave());
+        cancelPickerButton.setEnabled(false);
+        layoutChanged();
+    }
+
+    private void onItemSelectedFromPicker(ItemStack stack) {
+        // ItemSelectionView dispatches from inside its child-list mouse
+        // iteration; defer so exitPicker() can safely replace bounds/flags.
+        runNextTick(() -> {
+            addCustomItem(stack);
+            exitPicker();
+        });
+    }
+
+    private void onInventoryItemSelected(ItemStack stack) {
+        runNextTick(() -> {
+            addCustomItem(stack);
+            exitPicker();
+        });
+    }
+
+    /**
+     * Adds an arbitrary item stack to the right-hand selection list. Uses the
+     * matching preset's price/abundance when one exists for the item variant;
+     * otherwise the current create-market defaults are used (the same fallback
+     * as a preset-less market creation on the server).
+     */
+    private void addCustomItem(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return;
+
+        JsonObject serialized = MarketPreset.serializeItemStack(stack);
+        if (serialized == null || !serialized.has("id")) return;
+        String itemId = serialized.get("id").getAsString();
+        JsonObject components = serialized.has("components")
+                ? serialized.getAsJsonObject("components") : null;
+
+        float price = 1.0f;
+        float abundance = 10.0f;
+        boolean orderbookEnabled = true;
+        boolean ignoreAutosubscribe = false;
+
+        // Reuse preset values when this exact item variant is already known.
+        MarketPreset candidate = new MarketPreset(itemId, components, price, abundance);
+        String key = candidate.getUniqueKey();
+        outer:
+        for (MarketPresetCategory category : cachedCategories) {
+            MarketPreset existing = category.findPresetByKey(key);
+            if (existing != null) {
+                price = existing.getDefaultPrice();
+                abundance = existing.getNaturalAbundance();
+                orderbookEnabled = existing.isOrderbookEnabled();
+                ignoreAutosubscribe = existing.isIgnorePluginAutosubscribe();
+                break outer;
+            }
+        }
+
+        MarketPreset preset = new MarketPreset(itemId, components, price, abundance,
+                orderbookEnabled, ignoreAutosubscribe);
+        selectedPresets.put(preset.getUniqueKey(), preset);
+        itemGridDirty = true;
+        selectedListDirty = true;
+    }
+
+    private void rebuildInventoryPicker() {
+        inventoryPickerView.removeChilds();
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+
+        // 36 main inventory slots via getItem(i) (works on every supported version).
+        List<ItemStack> items = new ArrayList<>(36);
+        for (int i = 0; i < 36; i++) {
+            items.add(mc.player.getInventory().getItem(i));
+        }
+
+        final int cellSize = 18;
+        inventoryPickerView.addChild(buildSlotGrid(items, 9, 36, 3, cellSize));
+        inventoryPickerView.addChild(buildSlotGrid(items, 0, 9, 1, cellSize));
+    }
+
+    /**
+     * Builds a vanilla-style 9-column inventory sub-grid. Clicking an occupied
+     * slot forwards its stack to {@link #onInventoryItemSelected(ItemStack)}.
+     */
+    private StockMarketGuiElement buildSlotGrid(List<ItemStack> items, int startSlot, int endSlot,
+                                                int rows, int cellSize) {
+        final int spacing = 1;
+        final int columns = 9;
+        StockMarketGuiElement grid = new StockMarketGuiElement() {
+            @Override protected void render() { }
+            @Override protected void layoutChanged() { }
+        };
+        grid.setEnableBackground(false);
+        grid.setLayout(new LayoutGrid(0, spacing, true, true, rows, columns, Alignment.TOP));
+        grid.setSize(columns * cellSize + (columns - 1) * spacing,
+                rows * cellSize + (rows - 1) * spacing);
+
+        for (int slot = startSlot; slot < endSlot; slot++) {
+            ItemStack raw = slot < items.size() ? items.get(slot) : ItemStack.EMPTY;
+            if (raw == null || raw.isEmpty()) {
+                StockMarketGuiElement spacer = new StockMarketGuiElement() {
+                    @Override protected void render() { }
+                    @Override protected void layoutChanged() { }
+                };
+                spacer.setEnableBackground(true);
+                spacer.setEnableOutline(true);
+                spacer.setSize(cellSize, cellSize);
+                grid.addChild(spacer);
+            } else {
+                final ItemStack captured = raw.copy();
+                ItemView cell = new ItemView(captured) {
+                    @Override
+                    protected boolean mouseClickedOverElement(int button) {
+                        if (button == net.kroia.modutilities.gui.InputConstants.MOUSE_BUTTON_LEFT) {
+                            runNextTick(() -> onInventoryItemSelected(captured));
+                            return true;
+                        }
+                        return false;
+                    }
+                };
+                cell.setSize(cellSize, cellSize);
+                cell.setEnableBackground(true);
+                cell.setEnableOutline(true);
+                grid.addChild(cell);
+            }
+        }
+        return grid;
+    }
+
+    private static void runNextTick(Runnable task) {
+        Minecraft.getInstance().tell(task); // mc<=1.21.1
     }
 
     /**
@@ -333,32 +550,32 @@ public class CreateMarketTab extends StockMarketGuiElement {
             String key = entry.getKey();
             MarketPreset preset = entry.getValue();
 
-            // Use pre-registered ItemID from server when available (avoids cross-registry
-            // Holder issues with enchanted books/potions in singleplayer)
-            CompletableFuture<ItemID> itemIDFuture;
+            // Presets registered by the server keep their stable ItemID. Custom
+            // items (registry/inventory picker) go through the stack-based
+            // request so the server resolves and registers the ItemID itself.
+            CompletableFuture<Boolean> createFuture;
             if (preset.hasRegisteredItemID()) {
-                itemIDFuture = CompletableFuture.completedFuture(new ItemID(preset.getRegisteredItemIDShort()));
+                createFuture = getMarketManager().requestCreateMarket(
+                        new ItemID(preset.getRegisteredItemIDShort()));
             } else {
                 ItemStack stack = preset.toItemStack();
                 if (stack.isEmpty()) continue;
-                itemIDFuture = ItemID.getOrRegisterFromItemStackClientSide(stack);
+                createFuture = getMarketManager().requestCreateMarketFromStack(stack);
             }
 
-            CompletableFuture<Void> future = itemIDFuture.thenCompose(registeredID ->
-                getMarketManager().requestCreateMarket(registeredID).thenAccept(success -> {
-                    if (success) {
-                        info("Created market for " + preset.getItemId());
-                        anyCreated.set(true);
-                        Minecraft.getInstance().execute(() -> {
-                            selectedPresets.remove(key);
-                            itemGridDirty = true;
-                            selectedListDirty = true;
-                        });
-                    } else {
-                        warn("Failed to create market for " + preset.getItemId());
-                    }
-                })
-            );
+            CompletableFuture<Void> future = createFuture.thenAccept(success -> {
+                if (success) {
+                    info("Created market for " + preset.getItemId());
+                    anyCreated.set(true);
+                    Minecraft.getInstance().execute(() -> {
+                        selectedPresets.remove(key);
+                        itemGridDirty = true;
+                        selectedListDirty = true;
+                    });
+                } else {
+                    warn("Failed to create market for " + preset.getItemId());
+                }
+            });
             futures.add(future);
         }
 
@@ -502,17 +719,30 @@ public class CreateMarketTab extends StockMarketGuiElement {
         // Left column: category list (full height)
         categoryListView.setBounds(padding, padding, catWidth, height);
 
-        // Middle column: search bar on top, Select-all/Deselect-all row
-        // beneath it, then the item grid filling the rest.
+        // Middle column: search bar, custom-item picker buttons, bulk-selection
+        // row, then the item grid / picker filling the rest.
         int searchLabelWidth = 50;
         searchLabel.setBounds(midX, padding, searchLabelWidth, 15);
         searchField.setBounds(searchLabel.getRight() + spacing, padding, midWidth - searchLabelWidth - spacing, 15);
+
+        int addRowY = searchLabel.getBottom() + spacing;
+        if (registryPickerMode || inventoryPickerMode) {
+            addItemButton.setBounds(-1000, -1000, 0, 0);
+            addFromInventoryButton.setBounds(-1000, -1000, 0, 0);
+            cancelPickerButton.setBounds(midX + midWidth - eh, addRowY, eh, eh);
+        } else {
+            int addLeftW = (midWidth - spacing) / 2;
+            addItemButton.setBounds(midX, addRowY, addLeftW, eh);
+            addFromInventoryButton.setBounds(addItemButton.getRight() + spacing, addRowY,
+                    midWidth - addLeftW - spacing, eh);
+            cancelPickerButton.setBounds(-1000, -1000, 0, 0);
+        }
 
         // Row with the two bulk-selection buttons, split 50/50 across the
         // middle column width. The remainder of `midWidth` after the spacing
         // is distributed to the right button so the row lines up exactly with
         // the item grid on either side.
-        int bulkRowY = searchLabel.getBottom() + spacing;
+        int bulkRowY = addRowY + eh + spacing;
         int bulkLeftW = (midWidth - spacing) / 2;
         int bulkRightW = midWidth - bulkLeftW - spacing;
         selectAllButton.setBounds(midX, bulkRowY, bulkLeftW, eh);
@@ -521,6 +751,8 @@ public class CreateMarketTab extends StockMarketGuiElement {
         int gridTop = selectAllButton.getBottom() + spacing;
         int gridHeight = height - (gridTop - padding);
         itemGridView.setBounds(midX, gridTop, midWidth, gridHeight);
+        itemSelectionView.setBounds(midX, gridTop, midWidth, gridHeight);
+        inventoryPickerView.setBounds(midX, gridTop, midWidth, gridHeight);
         int containerWidth = itemGridView.getContainerWidth();
         itemGridLayout.columns = Math.max(1, containerWidth / ItemView.DEFAULT_WIDTH);
 

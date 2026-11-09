@@ -12,4 +12,6 @@ import java.util.concurrent.CompletableFuture;
 public interface IAsyncStockMarketCommandHandler {
     CompletableFuture<Boolean> stockmarket_manage_async(@NotNull UUID executor);
     CompletableFuture<Boolean> stockmarket_devTestScreen_async(@NotNull UUID executor);
+    /** Issue 31: opens the restricted player market screen (requires any market permission). */
+    CompletableFuture<Boolean> stockmarket_playerMarkets_async(@NotNull UUID executor);
 }

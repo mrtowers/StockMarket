@@ -43,6 +43,13 @@ public class ServerMarket implements ServerSaveable, IServerMarket {
     private long currentMarketPrice;
     private long netPlayerItemFlow = 0;
 
+    /**
+     * UUID of the player who created this market, or {@code null} for
+     * server-owned markets (legacy saves, command/API-created markets).
+     * Persisted in NBT; used by the issue-31 permission checks.
+     */
+    private @Nullable UUID ownerUUID = null;
+
     private MarketSettings settings;
 
     // Callback fired when this market enters maintenance, used by ServerMarketManager to cancel inter-market orders
@@ -192,6 +199,19 @@ public class ServerMarket implements ServerSaveable, IServerMarket {
     public ItemID getItemID()
     {
         return itemID;
+    }
+
+    @Override
+    public @Nullable UUID getOwnerUUID() {
+        return ownerUUID;
+    }
+
+    public void setOwnerUUID(@Nullable UUID ownerUUID) {
+        this.ownerUUID = ownerUUID;
+    }
+
+    public boolean isOwnedBy(@Nullable UUID playerUUID) {
+        return playerUUID != null && playerUUID.equals(ownerUUID);
     }
     @Override
     public ItemID getItemIDAsync() {
@@ -938,6 +958,10 @@ public class ServerMarket implements ServerSaveable, IServerMarket {
         tag.putBoolean("ignorePluginAutosubscribe", settings.ignorePluginAutosubscribe);
         // Persist the admin/integration maintenance flag so it survives restarts (missing on old NBT -> not under maintenance).
         tag.putBoolean("maintenance", settings.maintenance);
+        // Market creator (issue 31). Missing on legacy saves -> server-owned (null).
+        if (ownerUUID != null) {
+            NbtCompat.putUUID(tag, "ownerUUID", ownerUUID);
+        }
         // Trading hours. Override stored as byte: -1 = none, 0 = forced closed, 1 = forced open.
         tag.putInt("tradingOpenMinute", settings.tradingOpenMinute);
         tag.putInt("tradingCloseMinute", settings.tradingCloseMinute);
@@ -993,6 +1017,8 @@ public class ServerMarket implements ServerSaveable, IServerMarket {
         // Restore the maintenance flag only — do NOT call setMaintenance(): player orders were already
         // cancelled when maintenance was enabled, so the side effects must not re-run on load.
         settings.maintenance = tag.contains("maintenance") && NbtCompat.getBoolean(tag, "maintenance");
+        // Market creator (issue 31). Missing on legacy saves -> server-owned (null).
+        ownerUUID = NbtCompat.hasUUID(tag, "ownerUUID") ? NbtCompat.getUUID(tag, "ownerUUID") : null;
         // Trading hours: missing keys (old saves) -> always open, no override.
         applyTradingWindow(
                 tag.contains("tradingOpenMinute") ? NbtCompat.getInt(tag, "tradingOpenMinute") : 0,

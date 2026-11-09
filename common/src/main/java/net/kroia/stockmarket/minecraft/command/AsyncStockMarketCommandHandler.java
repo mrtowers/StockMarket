@@ -235,6 +235,28 @@ public class AsyncStockMarketCommandHandler implements IAsyncStockMarketCommandH
         return CompletableFuture.completedFuture(false);
     }
 
+    @Override
+    public CompletableFuture<Boolean> stockmarket_playerMarkets_async(@NotNull UUID executor) {
+        if (!MultiServerUtils.checkConnectionToMaster(executor))
+            return CompletableFuture.completedFuture(false);
+        CompletableFuture<Boolean> future = new CompletableFuture<>();
+        SM_BACKEND.MARKET_MANAGER.getAsync().getPlayerMarketPermissionsAsync(executor).thenAcceptAsync(perms -> {
+            ServerPlayer player = ServerPlayerUtilities.getOnlinePlayer(executor);
+            if (perms != null && perms.canOpenManagement()) {
+                if (player != null) {
+                    OpenUIPacket.sendToClient(player, OpenUIPacket.GUIType.PLAYER_MANAGEMENT, perms);
+                }
+                future.complete(true);
+            } else {
+                if (player != null) {
+                    player.sendSystemMessage(Component.translatable("message.stockmarket.command_permissions_none"));
+                }
+                future.complete(false);
+            }
+        });
+        return future;
+    }
+
     // === Response handling ===
     private static void handleResponse(CompletableFuture<OutputData> response, UUID executor) {
         response.whenComplete((result, throwable) -> {

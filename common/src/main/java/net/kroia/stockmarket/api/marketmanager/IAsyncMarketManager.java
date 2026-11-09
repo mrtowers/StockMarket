@@ -24,6 +24,16 @@ public interface IAsyncMarketManager {
     CompletableFuture<Boolean> isStockmarketAdminAsync(UUID playerUUID);
 
     /**
+     * Asynchronously fetches the player's per-market permissions. Routes to the
+     * master on slave servers; unknown players resolve to
+     * {@link PlayerMarketPermissions#NONE}.
+     *
+     * @param playerUUID the player to query
+     * @return future containing the effective permissions, never null
+     */
+    CompletableFuture<PlayerMarketPermissions> getPlayerMarketPermissionsAsync(UUID playerUUID);
+
+    /**
      * Asynchronously gets the player's trading preferences.
      * @param playerUUID the player to get preferences for
      * @return future containing the preferences

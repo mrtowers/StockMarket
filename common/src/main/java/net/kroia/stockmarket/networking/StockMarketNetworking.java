@@ -53,6 +53,10 @@ public class StockMarketNetworking extends NetworkPacketManager {
 
     public final MarketPriceHistoryRequest MARKET_PRICE_HISTORY_REQUEST = (MarketPriceHistoryRequest) AsynchronousRequestResponseSystem.register(new MarketPriceHistoryRequest());
     public final MarketsRequest MARKETS_REQUEST = (MarketsRequest) AsynchronousRequestResponseSystem.register(new MarketsRequest());
+    /** Issue 31: ownership snapshot for the management GUI (owner name + per-market access). */
+    public final MarketOwnersRequest MARKET_OWNERS_REQUEST = (MarketOwnersRequest) AsynchronousRequestResponseSystem.register(new MarketOwnersRequest());
+    /** Issue 31: server-authoritative market creation from an arbitrary ItemStack. */
+    public final MarketCreateFromStackRequest MARKET_CREATE_FROM_STACK_REQUEST = (MarketCreateFromStackRequest) AsynchronousRequestResponseSystem.register(new MarketCreateFromStackRequest());
     public final CreateOrderRequest CREATE_ORDER_REQUEST = (CreateOrderRequest) AsynchronousRequestResponseSystem.register(new CreateOrderRequest());
     public final ActiveOrdersRequest ACTIVE_ORDERS_REQUEST = (ActiveOrdersRequest) AsynchronousRequestResponseSystem.register(new ActiveOrdersRequest());
     public final ServerTimeRequest SERVER_TIME_REQUEST = (ServerTimeRequest) AsynchronousRequestResponseSystem.register(new ServerTimeRequest());

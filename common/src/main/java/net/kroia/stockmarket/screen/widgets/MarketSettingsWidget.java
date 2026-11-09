@@ -97,6 +97,8 @@ public class MarketSettingsWidget extends StockMarketGuiElement {
     private final Label tradingHoursDashLabel;
     private final TextBox tradingCloseTextBox;
     private final Button applyAllHoursButton;
+    /** false for manage=OWN players: the cross-market "apply to all" action is admin/ANY only. */
+    private final boolean canManageAll;
     /** Shows {@code invalid_time} (red) while the window is invalid, otherwise apply-all feedback. */
     private final Label tradingHoursStatusLabel;
     private final Label serverTimeLabel;
@@ -105,7 +107,13 @@ public class MarketSettingsWidget extends StockMarketGuiElement {
 
     public MarketSettingsWidget(ClientMarket market)
     {
+        this(market, true);
+    }
+
+    public MarketSettingsWidget(ClientMarket market, boolean canManageAll)
+    {
         this.market = market;
+        this.canManageAll = canManageAll;
         this.settings = new MarketSettings();
 
         maintenanceCheckBox = new CheckBox(MAINTENANCE_TEXT.getString());
@@ -338,8 +346,15 @@ public class MarketSettingsWidget extends StockMarketGuiElement {
         tradingHoursDashLabel.setBounds(tradingOpenTextBox.getRight() + spacing, tradingHoursLabel.getTop(), dashWidth, elementHeight);
         tradingCloseTextBox.setBounds(tradingHoursDashLabel.getRight() + spacing, tradingHoursLabel.getTop(),
                 fieldWidth - timeBoxWidth - dashWidth - 2 * spacing, elementHeight);
-        applyAllHoursButton.setBounds(padding, tradingHoursLabel.getBottom() + padding, width, elementHeight);
-        tradingHoursStatusLabel.setBounds(padding, applyAllHoursButton.getBottom() + padding, width, elementHeight);
+        if (canManageAll) {
+            applyAllHoursButton.setBounds(padding, tradingHoursLabel.getBottom() + padding, width, elementHeight);
+        } else {
+            applyAllHoursButton.setBounds(-1000, -1000, 0, 0);
+        }
+        int statusY = canManageAll
+                ? applyAllHoursButton.getBottom() + padding
+                : tradingHoursLabel.getBottom() + padding;
+        tradingHoursStatusLabel.setBounds(padding, statusY, width, elementHeight);
         serverTimeLabel.setBounds(padding, tradingHoursStatusLabel.getBottom() + padding, width, elementHeight);
 
         applyButton.setBounds(padding, serverTimeLabel.getBottom() + padding, width, elementHeight);
@@ -369,7 +384,7 @@ public class MarketSettingsWidget extends StockMarketGuiElement {
         tradingOpenTextBox.setTextColor(color);
         tradingCloseTextBox.setTextColor(color);
         applyButton.setEnabled(valid);
-        applyAllHoursButton.setEnabled(valid);
+        applyAllHoursButton.setEnabled(valid && canManageAll);
         tradingHoursStatusLabel.setTextColor(valid ? SUCCESS_TEXT_COLOR : ERROR_TEXT_COLOR);
         tradingHoursStatusLabel.setText(valid ? "" : INVALID_TIME_TEXT.getString());
         return valid;

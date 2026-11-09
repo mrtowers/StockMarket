@@ -3,6 +3,8 @@ package net.kroia.stockmarket.minecraft.command;
 import net.kroia.stockmarket.StockMarketModBackend;
 import net.kroia.stockmarket.api.command.IAsyncStockMarketCommandHandler;
 import net.kroia.stockmarket.api.command.IServerStockMarketCommandHandler;
+import net.kroia.stockmarket.api.marketmanager.MarketActionScope;
+import net.kroia.stockmarket.api.marketmanager.PlayerMarketPermissions;
 import net.kroia.stockmarket.data.StarterKitData;
 import net.kroia.stockmarket.networking.packet.OpenUIPacket;
 import net.kroia.modutilities.ServerPlayerUtilities;
@@ -53,6 +55,20 @@ public class ServerStockMarketCommandHandler implements IServerStockMarketComman
         return CompletableFuture.completedFuture(false);
     }
 
+    @Override
+    public CompletableFuture<Boolean> stockmarket_playerMarkets_async(@NotNull UUID executor) {
+        ServerPlayer player = ServerPlayerUtilities.getOnlinePlayer(executor);
+        if (player == null) return CompletableFuture.completedFuture(false);
+        PlayerMarketPermissions perms = BACKEND_INSTANCES.MARKET_MANAGER.getSync()
+                .getPlayerMarketPermissions(executor);
+        if (!perms.canOpenManagement()) {
+            player.sendSystemMessage(Component.translatable("message.stockmarket.command_permissions_none"));
+            return CompletableFuture.completedFuture(false);
+        }
+        OpenUIPacket.sendToClient(player, OpenUIPacket.GUIType.PLAYER_MANAGEMENT, perms);
+        return CompletableFuture.completedFuture(true);
+    }
+
     // === IServerStockMarketCommandHandler (master-only commands) ===
 
     @Override
@@ -77,6 +93,78 @@ public class ServerStockMarketCommandHandler implements IServerStockMarketComman
             return true;
         }
         return false;
+    }
+
+    @Override
+    public boolean stockmarket_setPlayerCreatePermission(@NotNull UUID executor, String userName, boolean allow) {
+        @Nullable UUID playerUUID = BACKEND_INSTANCES.MARKET_MANAGER.getSync().getPlayerUUID(userName);
+        if (playerUUID == null) {
+            sendMessage(executor, Component.translatable("message.stockmarket.command_player_not_found", userName));
+            return false;
+        }
+        if (BACKEND_INSTANCES.MARKET_MANAGER.getSync().setCanCreateMarkets(playerUUID, allow)) {
+            Component msg = Component.translatable(allow
+                    ? "message.stockmarket.command_permissions_create_enabled"
+                    : "message.stockmarket.command_permissions_create_disabled", userName);
+            sendMessage(executor, msg);
+            if (!executor.equals(playerUUID))
+                sendMessage(playerUUID, msg);
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean stockmarket_setPlayerDeleteScope(@NotNull UUID executor, String userName, MarketActionScope scope) {
+        @Nullable UUID playerUUID = BACKEND_INSTANCES.MARKET_MANAGER.getSync().getPlayerUUID(userName);
+        if (playerUUID == null) {
+            sendMessage(executor, Component.translatable("message.stockmarket.command_player_not_found", userName));
+            return false;
+        }
+        if (BACKEND_INSTANCES.MARKET_MANAGER.getSync().setDeleteScope(playerUUID, scope)) {
+            Component msg = Component.translatable("message.stockmarket.command_permissions_delete_set",
+                    userName, scope.name().toLowerCase(java.util.Locale.ROOT));
+            sendMessage(executor, msg);
+            if (!executor.equals(playerUUID))
+                sendMessage(playerUUID, msg);
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean stockmarket_setPlayerManageScope(@NotNull UUID executor, String userName, MarketActionScope scope) {
+        @Nullable UUID playerUUID = BACKEND_INSTANCES.MARKET_MANAGER.getSync().getPlayerUUID(userName);
+        if (playerUUID == null) {
+            sendMessage(executor, Component.translatable("message.stockmarket.command_player_not_found", userName));
+            return false;
+        }
+        if (BACKEND_INSTANCES.MARKET_MANAGER.getSync().setManageScope(playerUUID, scope)) {
+            Component msg = Component.translatable("message.stockmarket.command_permissions_manage_set",
+                    userName, scope.name().toLowerCase(java.util.Locale.ROOT));
+            sendMessage(executor, msg);
+            if (!executor.equals(playerUUID))
+                sendMessage(playerUUID, msg);
+            return true;
+        }
+        return false;
+    }
+
+    @Override
+    public boolean stockmarket_listPlayerPermissions(@NotNull UUID executor, String userName) {
+        @Nullable UUID playerUUID = BACKEND_INSTANCES.MARKET_MANAGER.getSync().getPlayerUUID(userName);
+        if (playerUUID == null) {
+            sendMessage(executor, Component.translatable("message.stockmarket.command_player_not_found", userName));
+            return false;
+        }
+        PlayerMarketPermissions perms = BACKEND_INSTANCES.MARKET_MANAGER.getSync().getPlayerMarketPermissions(playerUUID);
+        sendMessage(executor, Component.translatable("message.stockmarket.command_permissions_list",
+                userName,
+                String.valueOf(perms.admin()),
+                String.valueOf(perms.canCreate()),
+                perms.deleteScope().name().toLowerCase(java.util.Locale.ROOT),
+                perms.manageScope().name().toLowerCase(java.util.Locale.ROOT)));
+        return true;
     }
 
     @Override

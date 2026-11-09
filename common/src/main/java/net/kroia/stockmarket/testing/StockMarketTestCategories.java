@@ -50,6 +50,10 @@ public class StockMarketTestCategories {
     public static final TestCategory USER = new TestCategory(
             "stockmarket", "sm_user", "User class tests", BOTH, false);
 
+    /** Issue 31: per-player market permission matrix + ownership persistence. */
+    public static final TestCategory MARKET_PERMISSIONS = new TestCategory(
+            "stockmarket", "sm_market_permissions", "Player market permission scopes and owner persistence tests", MASTER_ONLY, true);
+
     public static final TestCategory PLAYER_PREFERENCES = new TestCategory(
             "stockmarket", "sm_player_preferences", "PlayerPreferences tests", BOTH, false);
 

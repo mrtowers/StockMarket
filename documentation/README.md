@@ -6,6 +6,7 @@ Index of all documentation pages. For an introduction to the mod, its blocks, co
 For players, server admins and content creators.
 
 - [Admin Setup Use Cases](user-guide/admin-setup.md) — standard bot-driven market vs. player-driven market
+- [Player-Created Markets](user-guide/player-market-creation.md) — per-player create/delete/manage permissions and the restricted player market screen
 - [Trading Hours](user-guide/trading-hours.md) — daily open/close windows, `/stockmarket open|close`, closed markets vs. maintenance mode
 - [Placeholders](user-guide/placeholders.md) — text placeholders (prices, 24h change, volume, player orders and portfolio) for scoreboards, tab lists and chat
 

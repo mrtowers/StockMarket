@@ -4,6 +4,7 @@ import net.kroia.modutilities.PermissionCompat;
 import com.google.gson.JsonObject;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.suggestion.Suggestions;
@@ -11,6 +12,7 @@ import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import net.kroia.banksystem.util.ItemID;
 import net.kroia.stockmarket.api.command.IAsyncStockMarketCommandHandler;
 import net.kroia.stockmarket.api.command.IServerStockMarketCommandHandler;
+import net.kroia.stockmarket.api.marketmanager.MarketActionScope;
 import net.kroia.stockmarket.StockMarketMod;
 import net.kroia.stockmarket.StockMarketModBackend;
 import net.kroia.stockmarket.api.pluginmanager.IServerPluginManager;
@@ -42,6 +44,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -78,6 +81,8 @@ public class StockMarketCommands {
         // /StockMarket order <username> cancelAll <itemID>                             - Cancel all order of a player for an item
         // /StockMarket BotSettingsGUI                                                  - Open the settings GUI for the stockmarket bots
         // /StockMarket ManagementGUI                                                   - Open the management GUI to create and remove trading items
+        // /StockMarket markets                                                         - Open the restricted player market screen (requires market permissions)
+        // /StockMarket permissions <player> ...                                        - Grant/revoke per-player market create/delete/manage scopes
         // /StockMarket <itemID> bot settings get                                       - Get bot settings
         // /StockMarket <itemID> bot settings set enabled                               - Enable bot
         // /StockMarket <itemID> bot settings set disabled                              - Disable bot
@@ -156,6 +161,81 @@ public class StockMarketCommands {
                                 })
                         )
                 )
+                .then(Commands.literal("permissions")
+                        .requires(source -> PermissionCompat.hasPermission(source, 2)) // Admin-only
+                        .then(Commands.argument("username", StringArgumentType.string())
+                                .suggests((context, builder) -> getPlayerNamesSuggestion(builder))
+                                .then(Commands.literal("list")
+                                        .executes(context -> {
+                                            CommandSourceStack source = context.getSource();
+                                            ServerPlayer player = source.getPlayerOrException();
+                                            String target = StringArgumentType.getString(context, "username");
+                                            if (isMaster())
+                                                masterHandler().stockmarket_listPlayerPermissions(player.getUUID(), target);
+                                            else
+                                                player.sendSystemMessage(Component.translatable("message.stockmarket.command_master_only"));
+                                            return Command.SINGLE_SUCCESS;
+                                        })
+                                )
+                                .then(Commands.literal("create")
+                                        .then(Commands.argument("allow", BoolArgumentType.bool())
+                                                .executes(context -> {
+                                                    CommandSourceStack source = context.getSource();
+                                                    ServerPlayer player = source.getPlayerOrException();
+                                                    String target = StringArgumentType.getString(context, "username");
+                                                    boolean allow = BoolArgumentType.getBool(context, "allow");
+                                                    if (isMaster())
+                                                        masterHandler().stockmarket_setPlayerCreatePermission(player.getUUID(), target, allow);
+                                                    else
+                                                        player.sendSystemMessage(Component.translatable("message.stockmarket.command_master_only"));
+                                                    return Command.SINGLE_SUCCESS;
+                                                })
+                                        )
+                                )
+                                .then(Commands.literal("delete")
+                                        .then(Commands.argument("scope", StringArgumentType.word())
+                                                .suggests((context, builder) -> suggestScopes(builder))
+                                                .executes(context -> {
+                                                    CommandSourceStack source = context.getSource();
+                                                    ServerPlayer player = source.getPlayerOrException();
+                                                    String target = StringArgumentType.getString(context, "username");
+                                                    MarketActionScope scope = parseScope(StringArgumentType.getString(context, "scope"));
+                                                    if (scope == null) {
+                                                        player.sendSystemMessage(Component.translatable("message.stockmarket.command_permissions_invalid_scope",
+                                                                StringArgumentType.getString(context, "scope")));
+                                                        return Command.SINGLE_SUCCESS;
+                                                    }
+                                                    if (isMaster())
+                                                        masterHandler().stockmarket_setPlayerDeleteScope(player.getUUID(), target, scope);
+                                                    else
+                                                        player.sendSystemMessage(Component.translatable("message.stockmarket.command_master_only"));
+                                                    return Command.SINGLE_SUCCESS;
+                                                })
+                                        )
+                                )
+                                .then(Commands.literal("manage")
+                                        .then(Commands.argument("scope", StringArgumentType.word())
+                                                .suggests((context, builder) -> suggestScopes(builder))
+                                                .executes(context -> {
+                                                    CommandSourceStack source = context.getSource();
+                                                    ServerPlayer player = source.getPlayerOrException();
+                                                    String target = StringArgumentType.getString(context, "username");
+                                                    MarketActionScope scope = parseScope(StringArgumentType.getString(context, "scope"));
+                                                    if (scope == null) {
+                                                        player.sendSystemMessage(Component.translatable("message.stockmarket.command_permissions_invalid_scope",
+                                                                StringArgumentType.getString(context, "scope")));
+                                                        return Command.SINGLE_SUCCESS;
+                                                    }
+                                                    if (isMaster())
+                                                        masterHandler().stockmarket_setPlayerManageScope(player.getUUID(), target, scope);
+                                                    else
+                                                        player.sendSystemMessage(Component.translatable("message.stockmarket.command_master_only"));
+                                                    return Command.SINGLE_SUCCESS;
+                                                })
+                                        )
+                                )
+                        )
+                )
                 .then(Commands.literal("manage")
                         .requires(source -> PermissionCompat.hasPermission(source, 2))
                         .executes(context -> {
@@ -165,6 +245,14 @@ public class StockMarketCommands {
                             return Command.SINGLE_SUCCESS;
                         })
 
+                )
+                .then(Commands.literal("markets")
+                        .executes(context -> {
+                            CommandSourceStack source = context.getSource();
+                            ServerPlayer player = source.getPlayerOrException();
+                            handler().stockmarket_playerMarkets_async(player.getUUID());
+                            return Command.SINGLE_SUCCESS;
+                        })
                 )
                 .then(Commands.literal("devTestScreen")
                         .requires(source -> PermissionCompat.hasPermission(source, 2) && StockMarketMod.ENABLE_DEV_FEATURES)
@@ -1184,5 +1272,29 @@ public class StockMarketCommands {
             future.complete(builder.build());
         });
         return future;
+    }
+
+    /** Suggests the three market action scopes used by /stockmarket permissions. */
+    private static CompletableFuture<Suggestions> suggestScopes(SuggestionsBuilder builder)
+    {
+        builder.suggest("none");
+        builder.suggest("own");
+        builder.suggest("any");
+        return builder.buildFuture();
+    }
+
+    /**
+     * Parses a scope argument. Returns {@code null} for unknown values so the
+     * command can report a friendly error instead of silently defaulting.
+     */
+    private static @Nullable MarketActionScope parseScope(String value)
+    {
+        if (value == null) return null;
+        return switch (value.toLowerCase(Locale.ROOT)) {
+            case "none" -> MarketActionScope.NONE;
+            case "own" -> MarketActionScope.OWN;
+            case "any" -> MarketActionScope.ANY;
+            default -> null;
+        };
     }
 }

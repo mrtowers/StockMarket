@@ -10,8 +10,10 @@ import net.kroia.modutilities.networking.client_server.arrs.AsynchronousRequestR
 import net.kroia.stockmarket.StockMarketMod;
 import net.kroia.stockmarket.StockMarketModBackend;
 import net.kroia.stockmarket.api.market.IAsyncMarket;
+import net.kroia.stockmarket.api.market.IServerMarket;
 import net.kroia.stockmarket.api.marketmanager.IAsyncMarketManager;
 import net.kroia.stockmarket.api.marketmanager.IServerMarketManager;
+import net.kroia.stockmarket.api.marketmanager.PlayerMarketPermissions;
 import net.kroia.stockmarket.stockmarket.market.AsyncMarket;
 import net.kroia.stockmarket.util.MultiServerUtils;
 import net.kroia.stockmarket.util.StockMarketLogger;
@@ -75,6 +77,7 @@ public class AsyncMarketManager implements IAsyncMarketManager {
         IsStockmarketAdmin,
         GetPlayerPreferences,
         UpdatePlayerPreferences,
+        GetPlayerMarketPermissions,
     }
 
 
@@ -99,6 +102,7 @@ public class AsyncMarketManager implements IAsyncMarketManager {
         put(FunctionType.OnPlayerJoin,                              codecPacket(ParamGroup_UUID_String.STREAM_CODEC, null));
         put(FunctionType.SetStockmarketAdminMode,                   codecPacket(ParamGroup_UUID_Bool.STREAM_CODEC, ByteBufCodecs.BOOL.cast()));
         put(FunctionType.IsStockmarketAdmin,                        codecPacket(UUIDUtil.STREAM_CODEC.cast(), ByteBufCodecs.BOOL.cast()));
+        put(FunctionType.GetPlayerMarketPermissions,                codecPacket(UUIDUtil.STREAM_CODEC.cast(), PlayerMarketPermissions.STREAM_CODEC));
         put(FunctionType.GetPlayerPreferences,                      codecPacket(UUIDUtil.STREAM_CODEC.cast(), PlayerPreferences.STREAM_CODEC));
         put(FunctionType.UpdatePlayerPreferences,                   codecPacket(ParamGroup_UUID_Preferences.STREAM_CODEC, ByteBufCodecs.BOOL.cast()));
 
@@ -201,8 +205,32 @@ public class AsyncMarketManager implements IAsyncMarketManager {
                 case FunctionType.GetTradingCurrencyID ->      OutputData.of(input.function, manager.getTradingCurrencyID());
                 case FunctionType.GetAvailableMarketIDs ->     OutputData.of(input.function, manager.getAvailableMarketIDs());
                 case FunctionType.MarketExists ->              OutputData.of(input.function, manager.marketExists(input.decodeParams()));
-                case FunctionType.CreateMarket ->              OutputData.of(input.function, manager.createMarket(input.decodeParams()) != null);
-                case FunctionType.DeleteMarket ->              OutputData.of(input.function, manager.deleteMarket(input.decodeParams()));
+                case FunctionType.CreateMarket -> {
+                    ItemID marketID = input.decodeParams();
+                    // Issue 31: player-originated creates need the CREATE permission.
+                    // Server-internal calls (playerSender == null) stay trusted.
+                    if (playerSender != null
+                            && !manager.isStockmarketAdmin(playerSender)
+                            && !manager.getPlayerMarketPermissions(playerSender).canCreate()) {
+                        warn("Rejected CreateMarket from player " + playerSender + " (no create permission)");
+                        yield OutputData.of(input.function, false);
+                    }
+                    yield OutputData.of(input.function, manager.createMarket(marketID, playerSender) != null);
+                }
+                case FunctionType.DeleteMarket -> {
+                    ItemID marketID = input.decodeParams();
+                    // Issue 31: player-originated deletes need DELETE(OWN|ANY) for this market.
+                    if (playerSender != null && !manager.isStockmarketAdmin(playerSender)) {
+                        IServerMarket market = manager.getMarket(marketID);
+                        if (market == null || !manager.getPlayerMarketPermissions(playerSender)
+                                .canDelete(market.getOwnerUUID(), playerSender)) {
+                            warn("Rejected DeleteMarket of " + marketID + " from player " + playerSender
+                                    + " (no delete permission / not owner)");
+                            yield OutputData.of(input.function, false);
+                        }
+                    }
+                    yield OutputData.of(input.function, manager.deleteMarket(marketID));
+                }
                 case FunctionType.GetMarket ->                 OutputData.of(input.function, manager.getMarket(input.decodeParams()) != null);
                 case FunctionType.OnPlayerJoin ->              {
                     ParamGroup_UUID_String data = (ParamGroup_UUID_String)input.decodeParams();
@@ -215,6 +243,13 @@ public class AsyncMarketManager implements IAsyncMarketManager {
                     yield OutputData.of(input.function);
                 }
                 case FunctionType.IsStockmarketAdmin ->        OutputData.of(input.function, manager.isStockmarketAdmin(input.decodeParams()));
+                case FunctionType.GetPlayerMarketPermissions -> {
+                    UUID requested = input.decodeParams();
+                    // A client may only ever read its own permissions; server-internal
+                    // callers (playerSender == null) may query any UUID.
+                    UUID target = playerSender != null ? playerSender : requested;
+                    yield OutputData.of(input.function, manager.getPlayerMarketPermissions(target));
+                }
                 case FunctionType.GetPlayerPreferences ->     OutputData.of(input.function, manager.getPlayerPreferences(input.decodeParams()));
                 case FunctionType.UpdatePlayerPreferences -> {
                     ParamGroup_UUID_Preferences data = (ParamGroup_UUID_Preferences)input.decodeParams();
@@ -233,6 +268,7 @@ public class AsyncMarketManager implements IAsyncMarketManager {
                      FunctionType.DeleteMarket,
                      FunctionType.GetMarket,
                      FunctionType.IsStockmarketAdmin,
+                     FunctionType.GetPlayerMarketPermissions,
                      FunctionType.GetPlayerPreferences,
                      FunctionType.UpdatePlayerPreferences -> true;
 
@@ -248,6 +284,7 @@ public class AsyncMarketManager implements IAsyncMarketManager {
                      FunctionType.GetAvailableMarketIDs,
                      FunctionType.MarketExists,
                      FunctionType.IsStockmarketAdmin,
+                     FunctionType.GetPlayerMarketPermissions,
                      FunctionType.GetMarket-> true;
 
                 default -> false;
@@ -436,6 +473,18 @@ public class AsyncMarketManager implements IAsyncMarketManager {
             return CompletableFuture.completedFuture(false);
         CompletableFuture<Boolean> future = new CompletableFuture<>();
         InputData inputData = InputData.of(FunctionType.IsStockmarketAdmin, playerUUID);
+        CompletableFuture<OutputData> outputDataFuture = sendRequest(inputData);
+        outputDataFuture.thenAccept((outputData)-> future.complete(outputData.decodeResult()));
+        return future;
+    }
+
+    @Override
+    public CompletableFuture<PlayerMarketPermissions> getPlayerMarketPermissionsAsync(UUID playerUUID)
+    {
+        if(!MultiServerUtils.canInteractWithStockMarket())
+            return CompletableFuture.completedFuture(PlayerMarketPermissions.NONE);
+        CompletableFuture<PlayerMarketPermissions> future = new CompletableFuture<>();
+        InputData inputData = InputData.of(FunctionType.GetPlayerMarketPermissions, playerUUID);
         CompletableFuture<OutputData> outputDataFuture = sendRequest(inputData);
         outputDataFuture.thenAccept((outputData)-> future.complete(outputData.decodeResult()));
         return future;

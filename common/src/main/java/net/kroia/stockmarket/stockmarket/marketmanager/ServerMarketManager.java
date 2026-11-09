@@ -15,6 +15,8 @@ import net.kroia.stockmarket.api.integration.MarketConfig;
 import net.kroia.stockmarket.api.market.IAsyncMarket;
 import net.kroia.stockmarket.api.market.IServerMarket;
 import net.kroia.stockmarket.api.marketmanager.IServerMarketManager;
+import net.kroia.stockmarket.api.marketmanager.MarketActionScope;
+import net.kroia.stockmarket.api.marketmanager.PlayerMarketPermissions;
 import net.kroia.stockmarket.data.table.record.MarketPriceStruct;
 import net.kroia.stockmarket.data.table.record.OrderRecordStruct;
 import net.kroia.stockmarket.networking.packet.MarketRemovedPacket;
@@ -124,6 +126,18 @@ public class ServerMarketManager implements ServerSaveableChunked, IServerMarket
     @Override
     public @Nullable IServerMarket createMarket(@NotNull ItemID marketID)
     {
+        return createMarket(marketID, null);
+    }
+
+    /**
+     * Owner-aware market creation. When a new market is created, {@code owner}
+     * is stored as its creator (issue 31). Existing markets are returned
+     * unchanged and never re-owned. Passing {@code null} creates a
+     * server-owned market, matching the legacy command/API behaviour.
+     */
+    @Override
+    public @Nullable IServerMarket createMarket(@NotNull ItemID marketID, @Nullable UUID owner)
+    {
         ServerMarket m = markets.get(marketID);
         if (m == null)
         {
@@ -139,6 +153,7 @@ public class ServerMarketManager implements ServerSaveableChunked, IServerMarket
             long defaultPrice = (preset != null) ? MarketManager.convertToRawAmountStatic(preset.getDefaultPrice()) : 1000;
             float abundance = (preset != null) ? preset.getNaturalAbundance() : 10f;
             m = new ServerMarket(marketID, null, defaultPrice, abundance);
+            m.setOwnerUUID(owner);
             // Propagate the preset's orderbookEnabled flag into the market's live settings.
             // Presets without the flag (legacy JSON) default to true via MarketPreset's field
             // default, matching the pre-existing behaviour for old markets.
@@ -185,6 +200,13 @@ public class ServerMarketManager implements ServerSaveableChunked, IServerMarket
     @Override
     public @Nullable IServerMarket createMarketWithConfig(@NotNull ItemID marketID, @NotNull MarketConfig cfg)
     {
+        return createMarketWithConfig(marketID, cfg, null);
+    }
+
+    @Override
+    public @Nullable IServerMarket createMarketWithConfig(@NotNull ItemID marketID, @NotNull MarketConfig cfg,
+                                                          @Nullable UUID owner)
+    {
         if (markets.containsKey(marketID)) {
             return null;
         }
@@ -199,6 +221,7 @@ public class ServerMarketManager implements ServerSaveableChunked, IServerMarket
         long defaultPrice = MarketManager.convertToRawAmountStatic(cfg.defaultPrice());
         float abundance = cfg.naturalAbundance();
         ServerMarket m = new ServerMarket(marketID, null, defaultPrice, abundance);
+        m.setOwnerUUID(owner);
         m.getSettings().virtualOrderbookEnabled = cfg.virtualOrderbookEnabled();
         m.getSettings().ignorePluginAutosubscribe = cfg.ignorePluginAutosubscribe();
         // Sync the runtime "disabled" flag on the underlying VirtualOrderbook so
@@ -420,6 +443,69 @@ public class ServerMarketManager implements ServerSaveableChunked, IServerMarket
             }
         }
         return null;
+    }
+
+    @Override
+    public @Nullable String getPlayerName(UUID playerUUID)
+    {
+        User user = userMap.get(playerUUID);
+        return user != null ? user.getName() : null;
+    }
+
+
+    // ── Per-player market permissions (issue 31) ──────────────────────────
+
+    @Override
+    public PlayerMarketPermissions getPlayerMarketPermissions(UUID playerUUID) {
+        User user = userMap.get(playerUUID);
+        if (user == null) return PlayerMarketPermissions.NONE;
+        return user.getMarketPermissions();
+    }
+
+    @Override
+    public CompletableFuture<PlayerMarketPermissions> getPlayerMarketPermissionsAsync(UUID playerUUID) {
+        return CompletableFuture.completedFuture(getPlayerMarketPermissions(playerUUID));
+    }
+
+    @Override
+    public boolean setCanCreateMarkets(UUID playerUUID, boolean canCreate) {
+        User user = userMap.get(playerUUID);
+        if (user == null) return false;
+        user.setCanCreateMarkets(canCreate);
+        return true;
+    }
+
+    @Override
+    public boolean setDeleteScope(UUID playerUUID, MarketActionScope scope) {
+        User user = userMap.get(playerUUID);
+        if (user == null) return false;
+        user.setDeleteScope(scope);
+        return true;
+    }
+
+    @Override
+    public boolean setManageScope(UUID playerUUID, MarketActionScope scope) {
+        User user = userMap.get(playerUUID);
+        if (user == null) return false;
+        user.setManageScope(scope);
+        return true;
+    }
+
+    /** @return true when the player may create markets (admin bypass included) */
+    public boolean canCreateMarket(UUID playerUUID) {
+        return getPlayerMarketPermissions(playerUUID).canCreate();
+    }
+
+    /** @return true when the player may delete the given market (admin bypass included) */
+    public boolean canDeleteMarket(UUID playerUUID, ServerMarket market) {
+        if (market == null) return false;
+        return getPlayerMarketPermissions(playerUUID).canDelete(market.getOwnerUUID(), playerUUID);
+    }
+
+    /** @return true when the player may manage the given market (admin bypass included) */
+    public boolean canManageMarket(UUID playerUUID, ServerMarket market) {
+        if (market == null) return false;
+        return getPlayerMarketPermissions(playerUUID).canManage(market.getOwnerUUID(), playerUUID);
     }
 
 

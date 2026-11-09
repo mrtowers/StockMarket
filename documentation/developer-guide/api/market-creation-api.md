@@ -209,6 +209,32 @@ void    closeMarket(@NotNull ItemID subject);
 
 ---
 
+## 6a. Ownership and per-player permissions (2.2.0+)
+
+Every market now carries an optional **owner UUID** (`ISyncServerMarket.getOwnerUUID()`, persisted in NBT). `null` means a server-owned market: legacy saves, command-created markets and markets created through the integration API below.
+
+Player-originated network creation records the sender as the owner automatically. The integration API is in-process and trusted, so it does **not** consult player permissions:
+
+```java
+// Server-owned market, unchanged behaviour:
+integration.openMarket(subject, MarketConfig.defaults());
+
+// Owner-aware lower-level overloads on ISyncServerMarketManager:
+manager.createMarket(subject, ownerUUID);
+manager.createMarketWithConfig(subject, cfg, ownerUUID);
+```
+
+Per-player permissions live in the public API:
+
+- `PlayerMarketPermissions` — `admin`, `create`, `deleteScope`, `manageScope`.
+- `MarketActionScope` — `NONE`, `OWN`, `ANY`; `ANY` also covers ownerless markets.
+- `ISyncServerMarketManager.getPlayerMarketPermissions(UUID)` / `setCanCreateMarkets(...)` / `setDeleteScope(...)` / `setManageScope(...)`.
+- `IAsyncMarketManager.getPlayerMarketPermissionsAsync(UUID)` routes to the master on slaves.
+
+Admins get `PlayerMarketPermissions.adminPermissions()` and bypass every scope. The same scopes gate the network RPCs for create/delete and all per-market settings/maintenance/trading-hours mutations. `create` does not grant plugin management, preset editing or mod settings — those remain admin-only.
+
+---
+
 ## 7. Maintenance mode
 
 Distinct from creating/deleting a market, you can put an existing market into

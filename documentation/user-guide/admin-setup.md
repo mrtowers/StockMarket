@@ -6,6 +6,7 @@ This guide covers two common ways to set up the stock market on a server, with c
 
 * [Use Case 1: Standard Market with Virtual Orderbook (default)](#use-case-1-standard-market-with-virtual-orderbook-default)
 * [Use Case 2: Player-Driven Market (virtual orderbook disabled)](#use-case-2-player-driven-market-virtual-orderbook-disabled)
+* [Use Case 3: Player-Created Markets](#use-case-3-player-created-markets)
 * [Recommendation](#recommendation)
 
 ---
@@ -88,6 +89,38 @@ Note: the **Clear** and **Reset Virtual Orderbook** buttons in the market settin
 * **Requires an active player base placing limit orders on both sides.** A market with only sellers or only buyers is effectively one-directional.
 * **Failed / partial market orders auto-refund**, but the failed-fill user experience may confuse players unfamiliar with real exchanges. Communicate the setup to your player base — a pinned message or server MOTD helps.
 * **Natural price drift.** The natural-price mechanism (based on `defaultPrice` and abundance) can still influence some server systems (news events, villager trade repricing, and volatility if it is enabled elsewhere), so the market can appear to drift without any player activity. Flag this behavior for players.
+
+---
+
+## Use Case 3: Player-Created Markets
+
+### What it is
+
+A setup where trusted players — not only admins — can create markets for items and manage the markets they own. Useful on economy/RP servers where the player base knows which items deserve a market, but you do not want to hand out full StockMarket admin rights.
+
+### Setup
+
+Grant the permissions on the master server:
+
+```text
+/stockmarket permissions <player> create true
+/stockmarket permissions <player> delete own
+/stockmarket permissions <player> manage own
+```
+
+Use `any` instead of `own` for a player who should manage every market, and `list` to inspect the current flags. The full model is described in [Player-Created Markets](player-market-creation.md).
+
+### When to use it
+
+* Trusted traders or faction leaders who should open markets for their own items.
+* Servers where admins do not want to be the only source of new markets.
+* Any setup where market ownership should follow the player who created the market.
+
+### Trade-offs
+
+* A player with `create` can make any non-blacklisted item tradable and allow it in the banking system. Only grant it to trusted players.
+* Players cannot change initial price/abundance at creation time; they can adjust the market later only if they have a manage scope for it.
+* Deleting a market is permanent and refunds/cancels open orders, exactly like an admin deletion.
 
 ---
 

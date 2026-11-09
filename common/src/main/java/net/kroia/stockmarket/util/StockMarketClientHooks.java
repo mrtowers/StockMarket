@@ -5,6 +5,7 @@ import net.kroia.modutilities.gui.client.RecipeImageExporter;
 import net.kroia.stockmarket.StockMarketMod;
 import net.kroia.stockmarket.StockMarketModBackend;
 import net.kroia.stockmarket.networking.packet.OpenUIPacket;
+import net.kroia.stockmarket.api.marketmanager.PlayerMarketPermissions;
 import net.kroia.stockmarket.networking.request.NewsHistoryRequest;
 import net.kroia.stockmarket.news.NewsRecord;
 import net.kroia.stockmarket.news.NewsToastCatchUp;
@@ -144,6 +145,11 @@ public class StockMarketClientHooks {
 
     public static void openGUI(OpenUIPacket.GUIType type)
     {
+        openGUI(type, PlayerMarketPermissions.NONE);
+    }
+
+    public static void openGUI(OpenUIPacket.GUIType type, PlayerMarketPermissions permissions)
+    {
         Minecraft mc = Minecraft.getInstance();
         switch(type)
         {
@@ -166,6 +172,15 @@ public class StockMarketClientHooks {
                 // through here so both /stockmarket manage command opens AND
                 // any future direct-open path go through the same gate.
                 ManagementScreen.openScreen();
+                break;
+            }
+            case PLAYER_MANAGEMENT:
+            {
+                // Issue 31: restricted player-facing management screen. The
+                // server already validated the permissions and ships them in
+                // the packet; the screen only uses them to hide unavailable
+                // actions (the server re-checks every mutation).
+                ManagementScreen.openPlayerScreen(permissions);
                 break;
             }
             case EXPORT_RECIPES:

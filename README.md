@@ -262,6 +262,18 @@ A server operator needs to grant StockMarket admin privileges:<br>
 <code>/stockmarket op</code> — Grant admin to yourself<br>
 <code>/stockmarket op [username]</code> — Grant admin to another player
 
+#### Player-Created Markets
+Trusted players can create and manage their own markets without full admin rights. Grant per-player scopes on the master server:
+
+```text
+/stockmarket permissions <player> list
+/stockmarket permissions <player> create <true|false>
+/stockmarket permissions <player> delete <none|own|any>
+/stockmarket permissions <player> manage <none|own|any>
+```
+
+Players with any of these permissions open the restricted screen with <code>/stockmarket markets</code>. They can create markets from preset categories or pick arbitrary items from the registry/inventory, and can only see Delete/Settings/Maintenance on markets covered by their scope. See the [Player-Created Markets](documentation/user-guide/player-market-creation.md) guide for details.
+
 #### Opening the Management GUI
 Run <code>/stockmarket manage</code> to open the management interface. It has three tabs:
 

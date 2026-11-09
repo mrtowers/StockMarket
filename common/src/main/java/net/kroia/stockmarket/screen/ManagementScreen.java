@@ -10,6 +10,9 @@ import net.kroia.modutilities.gui.elements.base.ListView;
 import net.kroia.modutilities.gui.layout.LayoutGrid;
 import net.kroia.modutilities.gui.layout.LayoutVertical;
 import net.kroia.stockmarket.StockMarketMod;
+import net.kroia.stockmarket.api.marketmanager.MarketActionScope;
+import net.kroia.stockmarket.api.marketmanager.MarketOwnerInfo;
+import net.kroia.stockmarket.api.marketmanager.PlayerMarketPermissions;
 import net.kroia.stockmarket.screen.widgets.CandlestickChart;
 import net.kroia.stockmarket.stockmarket.market.ClientMarket;
 import net.kroia.stockmarket.util.StockMarketGuiElement;
@@ -24,7 +27,9 @@ import net.minecraft.world.item.component.ItemLore;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Management screen using a TabElement to organize:
@@ -43,6 +48,8 @@ public class ManagementScreen extends StockMarketGuiScreen {
         public static final Component NEW_CUSTOM_MARKET_BUTTON = Component.translatable(PREFIX + "new_custom_market");
         public static final Component NEW_MARKET_BY_CATEGORY = Component.translatable(PREFIX + "new_market_by_category");
         public static final Component SELECTED_MARKET_TITLE = Component.translatable(PREFIX + "selected_market_title");
+        public static final Component OWNER = Component.translatable(PREFIX + "owner");
+        public static final Component SERVER_OWNER = Component.translatable(PREFIX + "owner_server");
         public static final Component REMOVE_MARKET_BUTTON = Component.translatable(PREFIX + "remove_market");
 
         public static final Component ASK_TITLE = Component.translatable(PREFIX + "ask_remove_title");
@@ -108,6 +115,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
 
         private final ItemView currentItemView;
         private final Label selectedMarketLabel;
+        private final Label ownerLabel;
         private final Button removeTradingPairButton;
         private final Button marketSettingsButton;
         private final CheckBox maintenanceCheckBox;
@@ -127,6 +135,10 @@ public class ManagementScreen extends StockMarketGuiScreen {
             parentScreen = parent;
             selectedMarketLabel = new Label(Texts.SELECTED_MARKET_TITLE.getString());
             selectedMarketLabel.setAlignment(Label.Alignment.CENTER);
+
+            ownerLabel = new Label("");
+            ownerLabel.setAlignment(Label.Alignment.CENTER);
+            ownerLabel.setTextFontScale(StockMarketGuiElement.hoverToolTipFontSize);
 
 
             removeTradingPairButton = new Button(Texts.REMOVE_MARKET_BUTTON.getString(), this::onRemoveTradingPairButtonClicked);
@@ -160,6 +172,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
             maintenanceAllMarketsButton.setHoverTooltipFontScale(StockMarketGuiElement.hoverToolTipFontSize);
 
             this.addChild(selectedMarketLabel);
+            this.addChild(ownerLabel);
             this.addChild(removeTradingPairButton);
             this.addChild(currentItemView);
             this.addChild(marketSettingsButton);
@@ -167,7 +180,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
             this.addChild(endMaintenanceAllMarketsButton);
             this.addChild(maintenanceAllMarketsButton);
 
-            this.setHeight(5*(elementHeight+spacing));
+            this.setHeight(6*(elementHeight+spacing));
 
             // T-125: per-element disable from T-123 is intentionally removed —
             // an untrusted slave now cannot open the ManagementScreen at all
@@ -186,45 +199,77 @@ public class ManagementScreen extends StockMarketGuiScreen {
             int width = getWidth()-2*padding;
 
             selectedMarketLabel.setBounds(padding, padding, width, elementHeight-spacing);
+            ownerLabel.setBounds(padding, selectedMarketLabel.getBottom(), width, elementHeight-spacing);
 
-            // Task 3: when no market is selected, hide the orange Delete button too
-            // (same off-screen-bounds pattern used for maintenanceCheckBox / marketSettingsButton).
-            // The item view stays full-width in that state so the "no selection" placeholder
-            // reads cleanly without a floating Delete button to its right.
+            boolean showDelete = hasSelection && parentScreen.canDeleteSelectedMarket();
+            boolean showManage = hasSelection && parentScreen.canManageSelectedMarket();
+            boolean showAdminControls = parentScreen.isAdminMode();
+
+            int rowY = ownerLabel.getBottom()+spacing;
             if (hasSelection) {
-                currentItemView.setBounds(padding, selectedMarketLabel.getBottom()+spacing, width/2, elementHeight);
-                removeTradingPairButton.setBounds(currentItemView.getRight()+spacing, currentItemView.getTop(), width/2-spacing, elementHeight);
+                currentItemView.setBounds(padding, rowY, showDelete ? width/2 : width, elementHeight);
+                if (showDelete) {
+                    removeTradingPairButton.setBounds(currentItemView.getRight()+spacing, currentItemView.getTop(), width/2-spacing, elementHeight);
+                } else {
+                    removeTradingPairButton.setBounds(-1000, -1000, 0, 0);
+                }
             } else {
-                currentItemView.setBounds(padding, selectedMarketLabel.getBottom()+spacing, width, elementHeight);
+                currentItemView.setBounds(padding, rowY, width, elementHeight);
                 removeTradingPairButton.setBounds(-1000, -1000, 0, 0);
             }
 
-            // Task 3: hide maintenanceCheckBox + marketSettingsButton when no market
-            // is selected. Collapse their rows to zero-height so the open/close-all
-            // buttons slide up and no dead space remains. Visibility is derived from
-            // hasSelection (set by setCurrentMarket).
-            if (hasSelection) {
-                maintenanceCheckBox.setBounds(currentItemView.getLeft(), currentItemView.getBottom()+spacing, width, elementHeight);
+            rowY = currentItemView.getBottom()+spacing;
+            if (showManage) {
+                maintenanceCheckBox.setBounds(currentItemView.getLeft(), rowY, width, elementHeight);
                 marketSettingsButton.setBounds(maintenanceCheckBox.getLeft(), maintenanceCheckBox.getBottom()+spacing, width, elementHeight);
+                rowY = marketSettingsButton.getBottom()+spacing;
             } else {
                 // Zero-size + off-screen so hit-testing can't trigger these controls.
                 maintenanceCheckBox.setBounds(-1000, -1000, 0, 0);
                 marketSettingsButton.setBounds(-1000, -1000, 0, 0);
             }
 
-            int btnW = (width - spacing) / 2;
-            int btnY = hasSelection
-                    ? marketSettingsButton.getBottom() + spacing
-                    : currentItemView.getBottom() + spacing;
-            endMaintenanceAllMarketsButton.setBounds(padding, btnY, btnW, elementHeight);
-            maintenanceAllMarketsButton.setBounds(endMaintenanceAllMarketsButton.getRight() + spacing, btnY, btnW, elementHeight);
+            if (showAdminControls) {
+                int btnW = (width - spacing) / 2;
+                endMaintenanceAllMarketsButton.setBounds(padding, rowY, btnW, elementHeight);
+                maintenanceAllMarketsButton.setBounds(endMaintenanceAllMarketsButton.getRight()+spacing, rowY, btnW, elementHeight);
+            } else {
+                endMaintenanceAllMarketsButton.setBounds(-1000, -1000, 0, 0);
+                maintenanceAllMarketsButton.setBounds(-1000, -1000, 0, 0);
+            }
         }
+
+        /**
+         * Refreshes the owner label and action-button visibility from the
+         * management screen's current permission/ownership snapshot. Called
+         * when the selection changes and after the ownership request returns.
+         */
+        public void refreshAccessVisibility() {
+            ItemID selected = parentScreen.getSelectedMarketID();
+            if (selected == null) {
+                ownerLabel.setText("");
+            } else {
+                MarketOwnerInfo owner = parentScreen.getMarketOwner(selected);
+                if (owner == null) {
+                    ownerLabel.setText("");
+                } else if (owner.ownerUUID() == null) {
+                    ownerLabel.setText(Texts.OWNER.getString() + ": " + Texts.SERVER_OWNER.getString());
+                } else {
+                    String name = owner.ownerName() == null || owner.ownerName().isEmpty()
+                            ? owner.ownerUUID().toString()
+                            : owner.ownerName();
+                    ownerLabel.setText(Texts.OWNER.getString() + ": " + name);
+                }
+            }
+            // Re-run layout so the remove/settings rows appear or disappear.
+            setBounds(getLeft(), getTop(), getWidth(), getHeight());
+        }
+
         public void setCurrentMarket(ItemID marketID) {
             if(marketID == null) {
                 currentItemView.setItemStack(ItemStack.EMPTY);
                 hasSelection = false;
-                // Re-layout so maintenanceCheckBox / marketSettingsButton hide.
-                setBounds(getLeft(), getTop(), getWidth(), getHeight());
+                refreshAccessVisibility();
                 return;
             }
             ItemStack stack = marketID.getStack();
@@ -235,7 +280,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
             }
             currentItemView.setItemStack(stack);
             hasSelection = true;
-            setBounds(getLeft(), getTop(), getWidth(), getHeight());
+            refreshAccessVisibility();
         }
         /** Updates the "Maintenance mode" checkbox without firing its change callback. */
         public void setMaintenanceCheckBoxChecked(boolean maintenance) {
@@ -259,7 +304,10 @@ public class ManagementScreen extends StockMarketGuiScreen {
             if(currentMarket == null)
                 return;
 
-            MarketManagementScreen managementScreen = new MarketManagementScreen(parentScreen, currentMarket.getItemID());
+            boolean canManageAll = parentScreen.isAdminMode()
+                    || parentScreen.getPermissions().manageScope() == MarketActionScope.ANY;
+            MarketManagementScreen managementScreen =
+                    new MarketManagementScreen(parentScreen, currentMarket.getItemID(), canManageAll);
             setScreen(managementScreen);
         }
         private void onMaintenanceCheckBoxChanged(Boolean maintenance)
@@ -376,7 +424,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
         private final List<MarketItemView> allMarketItems = new ArrayList<>();
         private final ListView listView;
         private final CurrentMarketManagerWidget currentMarketManagerWidget;
-        private final PluginOverviewWidget pluginOverviewWidget;
+        private final @Nullable PluginOverviewWidget pluginOverviewWidget;
 
         public OverviewTab(ManagementScreen parent) {
             super();
@@ -403,8 +451,10 @@ public class ManagementScreen extends StockMarketGuiScreen {
             currentMarketManagerWidget = new CurrentMarketManagerWidget(parent);
             listView.addChild(currentMarketManagerWidget);
 
-            pluginOverviewWidget = new PluginOverviewWidget(parent);
-            listView.addChild(pluginOverviewWidget);
+            pluginOverviewWidget = parent.adminMode ? new PluginOverviewWidget(parent) : null;
+            if (pluginOverviewWidget != null) {
+                listView.addChild(pluginOverviewWidget);
+            }
 
             // News button: opens the newspaper screen (T-074) — available to
             // everyone, the news feed is not admin-gated.
@@ -421,7 +471,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
             // settings.json, so the button is hidden on slave servers — the flag
             // is synced at join via PlayerJoinSyncPacket/ClientSettings. The server
             // additionally enforces op level 2 + master status in ModSettingsRequest.
-            if (isMasterServer()) {
+            if (parent.adminMode && isMasterServer()) {
                 Button modSettingsButton = new Button(Texts.MOD_SETTINGS.getString(),
                         () -> setScreen(new ModSettingsScreen(parent)));
                 modSettingsButton.setHeight(elementHeight);
@@ -438,7 +488,9 @@ public class ManagementScreen extends StockMarketGuiScreen {
             addChild(listView);
 
             loadMarketGrid();
-            getPluginManager().requestPluginList();
+            if (parent.adminMode) {
+                getPluginManager().requestPluginList();
+            }
         }
 
         private void loadMarketGrid() {
@@ -584,9 +636,13 @@ public class ManagementScreen extends StockMarketGuiScreen {
     // ---- ManagementScreen fields ----
 
     private final TabElement tabElement;
-    private final OverviewTab overviewTab;
-    private final CreateMarketTab createMarketTab;
-    private final PresetEditorTab presetEditorTab;
+    private final PlayerMarketPermissions permissions;
+    private final boolean adminMode;
+    private final @Nullable OverviewTab overviewTab;
+    private final @Nullable CreateMarketTab createMarketTab;
+    private final @Nullable PresetEditorTab presetEditorTab;
+    /** Issue 31: ownership snapshot for the selected-market action gating. */
+    private final Map<ItemID, MarketOwnerInfo> marketOwners = new HashMap<>();
     // T-125: the T-123 in-screen banner label has been removed. Untrusted
     // slaves never reach this screen (openScreen()/openGUI() send a chat
     // message and return early), so the banner would be unreachable UI.
@@ -607,28 +663,115 @@ public class ManagementScreen extends StockMarketGuiScreen {
         return selectedMarketID;
     }
 
+    /** @return the permissions this screen was opened with (never null) */
+    public PlayerMarketPermissions getPermissions() {
+        return permissions;
+    }
+
+    /** @return true when this screen runs in full-admin mode */
+    public boolean isAdminMode() {
+        return adminMode;
+    }
+
+    /** @return true when the player may delete the currently selected market */
+    public boolean canDeleteSelectedMarket() {
+        if (selectedMarketID == null) return false;
+        MarketOwnerInfo owner = marketOwners.get(selectedMarketID);
+        return permissions.canDelete(owner == null ? null : owner.ownerUUID(), getThisPlayerUUID());
+    }
+
+    /** @return true when the player may manage the currently selected market */
+    public boolean canManageSelectedMarket() {
+        if (selectedMarketID == null) return false;
+        MarketOwnerInfo owner = marketOwners.get(selectedMarketID);
+        return permissions.canManage(owner == null ? null : owner.ownerUUID(), getThisPlayerUUID());
+    }
+
+    /**
+     * @param marketID the market to look up
+     * @return the ownership snapshot, or {@code null} while the request is in flight/unknown
+     */
+    public @Nullable MarketOwnerInfo getMarketOwner(ItemID marketID) {
+        return marketOwners.get(marketID);
+    }
+
     public ManagementScreen() {
+        this(PlayerMarketPermissions.adminPermissions());
+    }
+
+    /**
+     * Constructs the management screen in admin or restricted player mode.
+     * Admin mode keeps every tab/widget; player mode only adds the tabs the
+     * permissions allow and hides admin-only controls.
+     *
+     * @param permissions the opening player's permissions (never null; {@code null} is treated as NONE)
+     */
+    public ManagementScreen(PlayerMarketPermissions permissions) {
         super(Texts.TITLE);
+
+        this.permissions = permissions == null ? PlayerMarketPermissions.NONE : permissions;
+        this.adminMode = this.permissions.admin();
 
         tabElement = new TabElement();
 
-        // Overview tab -- wraps existing chart/selector/widgets
-        overviewTab = new OverviewTab(this);
-        tabElement.addTab(TAB_OVERVIEW, overviewTab);
+        // Overview tab -- only useful when the player can delete/manage something.
+        boolean canOverview = adminMode
+                || this.permissions.deleteScope() != MarketActionScope.NONE
+                || this.permissions.manageScope() != MarketActionScope.NONE;
+        if (canOverview) {
+            overviewTab = new OverviewTab(this);
+            tabElement.addTab(TAB_OVERVIEW, overviewTab);
+        } else {
+            overviewTab = null;
+        }
 
-        // Create Markets tab -- category-based preset browser
-        createMarketTab = new CreateMarketTab();
-        createMarketTab.setOnMarketsChanged(overviewTab::refreshMarketList);
-        tabElement.addTab(TAB_CREATE_MARKETS, createMarketTab);
+        // Create Markets tab -- category-based preset browser + custom items.
+        if (adminMode || this.permissions.canCreate()) {
+            createMarketTab = new CreateMarketTab(this.permissions);
+            createMarketTab.setOnMarketsChanged(() -> {
+                if (overviewTab != null) overviewTab.refreshMarketList();
+                refreshMarketOwners();
+            });
+            tabElement.addTab(TAB_CREATE_MARKETS, createMarketTab);
+        } else {
+            createMarketTab = null;
+        }
 
-        // Presets tab -- edit preset prices and abundance values
-        presetEditorTab = new PresetEditorTab();
-        tabElement.addTab(TAB_PRESETS, presetEditorTab);
+        // Presets tab -- admin-only.
+        if (adminMode) {
+            presetEditorTab = new PresetEditorTab();
+            tabElement.addTab(TAB_PRESETS, presetEditorTab);
+        } else {
+            presetEditorTab = null;
+        }
 
         // T-125: the T-123 red info banner has been removed. See the
         // openScreen() entry guard: untrusted slaves never reach construction.
 
         addElement(tabElement);
+
+        // Ownership data is UI metadata; server-side mutations re-check every
+        // permission anyway. Refresh after construction so the owner label and
+        // action buttons appear as soon as the round-trip completes.
+        refreshMarketOwners();
+    }
+
+    /**
+     * Fetches the ownership snapshot for all markets. Safe to call repeatedly;
+     * the response replaces the local map.
+     */
+    private void refreshMarketOwners() {
+        if (overviewTab == null) return;
+        getMarketManager().requestMarketOwners().thenAccept(list ->
+                Minecraft.getInstance().execute(() -> {
+                    marketOwners.clear();
+                    for (MarketOwnerInfo info : list) {
+                        marketOwners.put(info.marketID(), info);
+                    }
+                    if (overviewTab != null) {
+                        overviewTab.getCurrentMarketManagerWidget().refreshAccessVisibility();
+                    }
+                }));
     }
 
     /**
@@ -644,6 +787,33 @@ public class ManagementScreen extends StockMarketGuiScreen {
      */
     public static void openScreen()
     {
+        openScreen(PlayerMarketPermissions.adminPermissions());
+    }
+
+    /**
+     * Opens the restricted player-facing management screen (issue 31).
+     * Refuses when the player has no market permission at all; the server
+     * checks the same condition before sending the packet.
+     *
+     * @param permissions the permissions shipped by the server
+     */
+    public static void openPlayerScreen(@Nullable PlayerMarketPermissions permissions)
+    {
+        PlayerMarketPermissions perms = permissions == null ? PlayerMarketPermissions.NONE : permissions;
+        if (!perms.canOpenManagement()) {
+            net.minecraft.client.player.LocalPlayer player = Minecraft.getInstance().player;
+            if (player != null) {
+                net.kroia.modutilities.PlayerCompat.sendMessage(player,
+                        Component.translatable("message.stockmarket.command_permissions_none"),
+                        false);
+            }
+            return;
+        }
+        openScreen(perms);
+    }
+
+    private static void openScreen(PlayerMarketPermissions permissions)
+    {
         if (StockMarketGuiElement.isUntrustedSlave()) {
             // Chat notice via the local player. Same idiom as the other
             // "action unavailable" chat notices in the mod (no toast API in
@@ -656,7 +826,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
             }
             return;
         }
-        ManagementScreen screen = new ManagementScreen();
+        ManagementScreen screen = new ManagementScreen(permissions);
         net.kroia.modutilities.gui.client.ClientCompat.setScreen(screen);
     }
 
@@ -698,6 +868,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
      */
     private void onMarketSelected(ItemID itemID)
     {
+        if (overviewTab == null) return;
         ClientMarket currentMarket = StockMarketGuiElement.getSelectedMarket();
         if(currentMarket != null)
         {
@@ -733,6 +904,8 @@ public class ManagementScreen extends StockMarketGuiScreen {
      */
     @Override
     public void onMarketRemoved(ItemID marketID) {
+        marketOwners.remove(marketID);
+        if (overviewTab == null) return;
         if (marketID.equals(selectedMarketID)) {
             // The ClientMarket (and its price stream) is already gone — only clear
             // the screen-side selection state.
@@ -743,6 +916,7 @@ public class ManagementScreen extends StockMarketGuiScreen {
         }
         // Refresh the grid so the deleted market disappears from the selector.
         overviewTab.refreshMarketList();
+        refreshMarketOwners();
     }
 
     /**
@@ -836,8 +1010,9 @@ public class ManagementScreen extends StockMarketGuiScreen {
                         }
                         StockMarketGuiElement.selectMarket(null);
                     }
-                    // Return to a fresh ManagementScreen so the market list is refreshed
-                    setScreen(new ManagementScreen());
+                    // Return to a fresh screen with the same permissions so a
+                    // manage-own/delete-own player never lands in admin mode.
+                    setScreen(new ManagementScreen(parentScreen.getPermissions()));
                 });
             });
         }

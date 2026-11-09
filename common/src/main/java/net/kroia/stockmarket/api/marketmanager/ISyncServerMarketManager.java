@@ -20,6 +20,20 @@ public interface ISyncServerMarketManager {
     @Nullable IServerMarket createMarket(@NotNull ItemID marketID);
 
     /**
+     * Owner-aware counterpart to {@link #createMarket(ItemID)}. The default
+     * implementation delegates to the owner-less method so third-party
+     * implementations stay source-compatible; {@code ServerMarketManager}
+     * overrides it and records the creator.
+     *
+     * @param marketID the ItemID to create a market for (never null)
+     * @param owner    the creating player, or {@code null} for server-owned markets
+     * @return the market, or {@code null} when creation was rejected
+     */
+    default @Nullable IServerMarket createMarket(@NotNull ItemID marketID, @Nullable UUID owner) {
+        return createMarket(marketID);
+    }
+
+    /**
      * Creates a market from an explicit {@link MarketConfig}, bypassing the
      * preset system. Mirrors {@link #createMarket(ItemID)} but sources initial
      * price, natural abundance, and market flags from the passed config
@@ -39,12 +53,75 @@ public interface ISyncServerMarketManager {
      */
     @Nullable IServerMarket createMarketWithConfig(@NotNull ItemID marketID, @NotNull MarketConfig cfg);
 
+    /**
+     * Owner-aware counterpart to {@link #createMarketWithConfig(ItemID, MarketConfig)}.
+     * The default delegates to the owner-less method; {@code ServerMarketManager}
+     * records the creator on the new market.
+     *
+     * @param marketID the ItemID to create a market for (never null)
+     * @param cfg      the configuration to apply (never null)
+     * @param owner    the creating player, or {@code null} for server-owned markets
+     * @return the newly created market, or {@code null} if one already existed/rejected
+     */
+    default @Nullable IServerMarket createMarketWithConfig(@NotNull ItemID marketID, @NotNull MarketConfig cfg,
+                                                           @Nullable UUID owner) {
+        return createMarketWithConfig(marketID, cfg);
+    }
+
     boolean deleteMarket(@NotNull ItemID marketID);
     @Nullable IServerMarket getMarket(@NotNull ItemID marketID);
 
     @Nullable UUID getPlayerUUID(String playerName);
+
+    /**
+     * @param playerUUID the player to resolve
+     * @return the last known player name, or {@code null} when the UUID is unknown
+     */
+    default @Nullable String getPlayerName(UUID playerUUID) {
+        return null;
+    }
+
     boolean setStockmarketAdminMode(UUID playerUUID, boolean isAdmin);
     boolean isStockmarketAdmin(UUID playerUUID);
+
+    /**
+     * Returns the player's per-market permissions. Unknown players and
+     * server-side callers without a user record get {@link PlayerMarketPermissions#NONE}.
+     * StockMarket admins get {@link PlayerMarketPermissions#adminPermissions()}.
+     *
+     * @param playerUUID the player to query
+     * @return the effective permissions, never null
+     */
+    default @NotNull PlayerMarketPermissions getPlayerMarketPermissions(UUID playerUUID) {
+        return PlayerMarketPermissions.NONE;
+    }
+
+    /**
+     * Grants or revokes the player's market-creation permission.
+     *
+     * @return true when the player record exists and was updated
+     */
+    default boolean setCanCreateMarkets(UUID playerUUID, boolean canCreate) {
+        return false;
+    }
+
+    /**
+     * Sets the player's market-delete scope.
+     *
+     * @return true when the player record exists and was updated
+     */
+    default boolean setDeleteScope(UUID playerUUID, MarketActionScope scope) {
+        return false;
+    }
+
+    /**
+     * Sets the player's market-manage scope.
+     *
+     * @return true when the player record exists and was updated
+     */
+    default boolean setManageScope(UUID playerUUID, MarketActionScope scope) {
+        return false;
+    }
 
     /**
      * Gets the player's trading preferences (favorites, last market, etc.)
